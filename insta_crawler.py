@@ -87,37 +87,21 @@ class InstagramCrawlerEngine(Thread):
     """
     RIGHT_ARROW_CLASS_NAME = 'coreSpriteRightPaginationArrow'
 
-    def __init__(self, webdriver, log_queue=None, hashtag_queue=None,
-                 hashtag_duplicate=None, thread_stopper=None):
+    def __init__(self, webdriver, hash_tag=None, thread_stopper=None):
         super().__init__()
         self.driver = webdriver
         # different urls for different target sites
         self.base_url = 'http://www.instagram.com/explore/tags/{}'
         self.save_folder_name = self.create_image_folder()
-        self.log_queue = log_queue
-        self.hashtag_queue = hashtag_queue
-        self.hashtag_duplicate = hashtag_duplicate
+        self.hash_tag = hash_tag
         self.main_window = None
         self.thread_stopper = thread_stopper
-
-    def set_tag(self, tag='korea'):
-        """
-        Sets the tag to search.
-
-        Args:
-            tag (str): search tag
-
-        Returns:
-            complete url with tag included
-        """
-        tag = self.hashtag_queue.get()
-        return self.base_url.format(tag)
 
     def launch_driver(self):
         """
         Launch the web driver (selenium) to start crawling.
         """
-        landing_url = self.set_tag()
+        landing_url = self.base_url.format(self.hash_tag)
         self.driver.get(landing_url)
         self.driver.set_window_size(900, 600)
 
@@ -131,6 +115,7 @@ class InstagramCrawlerEngine(Thread):
         try:
             # select rightmost picture (instagram pictures are organized in three columns)
             gateway_img_elem = self.driver.get_elem_at_point(850, 300)
+            # 50, 300 / 450, 300
             gateway_img_elem.click()  # click the element
             self.rest()
         except selenium.common.exceptions.NoSuchElementException:
@@ -286,16 +271,14 @@ class InstagramCrawlerEngine(Thread):
         """
         time.sleep(2)
 
-    def __call__(self, log_queue=None, hashtag_queue=None, hashtag_duplicate=None):
+    def __call__(self, hash_tag = None):
         """
         Make the class instance callable.
 
         Args:
             log_queue (queue.Queue): thread-safe queue for collecting download status.
         """
-        self.log_queue = log_queue
-        self.hashtag_queue = hashtag_queue
-        self.hashtag_duplicate = hashtag_duplicate
+        self.hash_tag = hash_tag
         self.start_crawl()
 
     def run(self):
@@ -323,8 +306,6 @@ class InstagramCrawlerEngine(Thread):
                 image_src = self.find_next_img()
                 success, filename = self.download(
                         img_src=image_src, folder=self.save_folder_name)
-                if self.hashtag_queue.qsize() < 20:
-                    self.add_hashtag()  # add to hashtag queue
 
                 # log the download event
                 log_entry = {
@@ -335,8 +316,6 @@ class InstagramCrawlerEngine(Thread):
                 }
                 print(log_entry)
 
-                if self.log_queue is not None:
-                    self.log_queue.put(log_entry)
             except (self.ImageNotFoundException,
                 selenium.common.exceptions.StaleElementReferenceException):
                 # image not found for this step
