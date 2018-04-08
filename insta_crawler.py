@@ -3,6 +3,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
+import selenium.webdriver.support.expected_conditions as EC
 from crawler_engine_abc import CrawlerEngine
 import threading
 from threading import Thread
@@ -20,6 +21,31 @@ import io
 class PhotoImgLoaded(object):
     """
     Callable class for finding photo image in instagram post.
+    """
+    def __init__(self, location):
+        self.location = location
+
+    def __call__(self, driver):
+        try:
+            # select image or video
+            x, y = self.location
+            img_or_video = driver.get_elem_at_point(x, y)
+            img_parent = img_or_video.find_elements(By.XPATH, '..')[0]  # go to parent
+            img_elem_arr = img_parent.find_elements_by_tag_name('img')
+
+            if len(img_elem_arr) > 0:
+                img_elem = img_elem_arr[0]
+                return img_elem
+            else:
+                return False
+        except:
+            # catch all exception and simply return false
+            # do not delegate exceptions since timeout WILL occur
+            return False
+
+class TextLoaded(object):
+    """
+    Callable class for finding text in instagram post.
     """
     def __init__(self, location):
         self.location = location
@@ -87,13 +113,14 @@ class InstagramCrawlerEngine(Thread):
     """
     RIGHT_ARROW_CLASS_NAME = 'coreSpriteRightPaginationArrow'
 
-    def __init__(self, webdriver, hash_tag=None, thread_stopper=None):
+    def __init__(self, webdriver, hash_tag=None, worker_num=0, thread_stopper=None):
         super().__init__()
         self.driver = webdriver
         # different urls for different target sites
         self.base_url = 'http://www.instagram.com/explore/tags/{}'
         self.save_folder_name = self.create_image_folder()
         self.hash_tag = hash_tag
+        self.worker_num = worker_num
         self.main_window = None
         self.thread_stopper = thread_stopper
 
@@ -114,7 +141,7 @@ class InstagramCrawlerEngine(Thread):
         """
         try:
             # select rightmost picture (instagram pictures are organized in three columns)
-            gateway_img_elem = self.driver.get_elem_at_point(850, 300)
+            gateway_img_elem = self.driver.get_elem_at_point(50 + 400*self.worker_num, 300)
             # 50, 300 / 450, 300
             gateway_img_elem.click()  # click the element
             self.rest()
@@ -196,6 +223,23 @@ class InstagramCrawlerEngine(Thread):
             raise self.ImageNotFoundException('Image Not Found')
         return img_elem.get_attribute('src')
 
+    def find_next_text(self):
+        """
+        Find next image to crawl and download.
+
+        Returns:
+            url (str): image source url
+        """
+        try:
+            text_elem = WebDriverWait(self.driver, 30).until(
+                EC.element_to_be_clickable((By.TAG_NAME, 'article')))
+            # text_elem = WebDriverWait(self.driver, 10).until(
+            #     EC.presence_of_element_located((By.TAG_NAME, 'section')))
+        except TimeoutException:
+            print("time out")
+            raise self.ImageNotFoundException('Text Not Found')
+        return 1
+
     def go_next_post(self):
         """
         Proceed to next post of instagram.
@@ -210,10 +254,11 @@ class InstagramCrawlerEngine(Thread):
         """
         Find text of instagram post.
         """
-        img_or_video = self.driver.get_elem_at_point(250, 200)
-        parent_dom = img_or_video.find_elements(By.XPATH, '..')[0]  # go to parent
-        while not parent_dom.tag_name == 'article':
-            parent_dom = parent_dom.find_elements(By.XPATH, '..')[0]
+        #img_or_video = self.driver.get_elem_at_point(250, 200)
+        parent_dom = self.driver.find_elements_by_xpath("//section")[2]  # go to parent
+        #while not parent_dom.tag_name == 'article':
+        # parent_dom = self.driver.find_elements_by_xpath("//ul")[1]
+        parent_dom = parent_dom.find_elements(By.XPATH, '..')[0] # div under article
 
         text_area = parent_dom.find_elements_by_tag_name('ul')[0]
         children_list_elems = text_area.find_elements_by_tag_name('li')
@@ -234,30 +279,24 @@ class InstagramCrawlerEngine(Thread):
             for sp in spans:
                 comment_text.append(sp.text)
 
-        return main_text, comment_text
+        # print(main_text)
+        # user_name = parent_dom.find_elements(By.XPATH, '..')[0].find_elements_by_tag_name('div')[1]
+        user_name = main_post_texts.find_elements_by_tag_name('a')[0].text
+        # print(user_name)
+        likes_section = parent_dom.find_elements_by_tag_name('section')
+        like_num = likes_section[1].find_elements_by_tag_name('a')
+        
+        # if len(like_num) > 0:
+        #     if like_num[0].text == 'Log in':
+        #         print(0)
+        #     else:
+        #         # monkey_thx, mla524 likes this
+        #         print(len(like_num))
+        # else:
+        #     # 356 likes
+        #     print(likes_section[1].text.split(' ')[0])
 
-    def add_hashtag(self):
-        """
-        Add hashtags of the post to queue.
-        """
-        img_or_video = self.driver.get_elem_at_point(250, 200)
-        parent_dom = img_or_video.find_elements(By.XPATH, '..')[0]  # go to parent
-        while not parent_dom.tag_name == 'article':
-            parent_dom = parent_dom.find_elements(By.XPATH, '..')[0]
-        text_area = parent_dom.find_elements_by_tag_name('ul')[0]
-        children_list_elems = text_area.find_elements_by_tag_name('li')
-        main_post_texts = children_list_elems[0]
-        main_text_elem = main_post_texts.find_elements_by_tag_name('span')
-        for main_span in main_text_elem:
-            main_span_splits = main_span.text.split(" ")
-            if self.hashtag_queue.qsize() >= 20:
-                break
-            for word in main_span_splits:
-                if (len(word) > 0
-                        and word[0] == '#'
-                        and word[1:] not in self.hashtag_duplicate):
-                    self.hashtag_queue.put(word[1:])
-                    self.hashtag_duplicate.add(word[1:])
+        return main_text, comment_text
 
     def close(self):
         """
@@ -271,7 +310,7 @@ class InstagramCrawlerEngine(Thread):
         """
         time.sleep(2)
 
-    def __call__(self, hash_tag = None):
+    def __call__(self, hash_tag=None, worker_num=0):
         """
         Make the class instance callable.
 
@@ -279,6 +318,7 @@ class InstagramCrawlerEngine(Thread):
             log_queue (queue.Queue): thread-safe queue for collecting download status.
         """
         self.hash_tag = hash_tag
+        self.worker_num = worker_num
         self.start_crawl()
 
     def run(self):
@@ -299,25 +339,45 @@ class InstagramCrawlerEngine(Thread):
         self.main_window = self.init_crawl()
 
         count = 0  # keep track of crawl count
+        start_time = time.time()
         while not self.thread_stopper.is_set():
             count += 1
-            try:
-                self.go_next_post()
-                image_src = self.find_next_img()
-                success, filename = self.download(
-                        img_src=image_src, folder=self.save_folder_name)
+            #try:
+            self.go_next_post()
+            # self.go_next_post()
+            success = self.find_next_text()
+           
+            # success, filename = self.download(
+            #         img_src=image_src, folder=self.save_folder_name)
+            attempts = 0
+            while attempts < 5:
+                try:
+                    main_text, comment_text = self.find_text()
+                    print("success")
+                    break
+                except:
+                    print("fail attempt")
+                    attempts += 1
+            # print(main_text[0])
 
-                # log the download event
-                log_entry = {
-                    'time': time.time(),
-                    'name': filename,
-                    'filepath': os.path.join(self.save_folder_name, filename),
-                    'success': success,
-                }
-                print(log_entry)
+            # log the download event
+            current_time = time.time() - start_time
+            log_entry = {
+                'time': "count: {}, {}m, {}s".format(count, current_time // 60, current_time % 60),
+                # 'name': filename,
+                # 'filepath': os.path.join(self.save_folder_name, filename),
+                # 'success': success,
+            }
+            print(log_entry)
 
+            '''
             except (self.ImageNotFoundException,
                 selenium.common.exceptions.StaleElementReferenceException):
+                print("exception")
+                # if (True):
+                #     main_text, comment_text = self.find_text()
+                # print(main_text[0])
+
                 # image not found for this step
                 # (it might be video or the link might have been broken)
                 # StaelElementReferenceException occurs when DOM element is modified
@@ -325,7 +385,7 @@ class InstagramCrawlerEngine(Thread):
                 continue
             except (ConnectionRefusedError, http.client.RemoteDisconnected):
                 print('Driver closed by SIGINT or connection refused from target host.')
-                break
+                break'''
         print('RETURNING from start_crawl() and closing thread id : {}.'.format(threading.get_ident()))
 
     class ImageNotFoundException(Exception):

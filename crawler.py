@@ -44,13 +44,15 @@ class Crawler:
                 crawler_engine_inst = self.crawler_engine_cls(
                         self.webdriver_cls(),
                         hash_tag=self.hash_tag,
+                        worker_num=_,
                         thread_stopper=self.stopper)
                 workers.add(crawler_engine_inst)
             else:
                 workers.add(Thread(
                     target=self.crawler_engine_cls(self.webdriver_cls()),
                     kwargs={
-                        'hash_tag': self.hash_tag
+                        'hash_tag': self.hash_tag,
+                        'worker_num': _
                     }))
         return workers
 
