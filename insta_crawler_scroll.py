@@ -130,24 +130,7 @@ class InstagramCrawlerEngine(Thread):
         """
         landing_url = self.base_url.format(self.hash_tag)
         self.driver.get(landing_url)
-        self.driver.set_window_size(900, 600)
-
-    def init_crawl(self):
-        """
-        Set up and get ready for crawling.
-
-        Returns:
-            main window (tab) that becomes the base for crawling
-        """
-        try:
-            # select rightmost picture (instagram pictures are organized in three columns)
-            gateway_img_elem = self.driver.get_elem_at_point(50 + 400*self.worker_num, 300)
-            # 50, 300 / 450, 300
-            gateway_img_elem.click()  # click the element
-            self.rest()
-        except selenium.common.exceptions.NoSuchElementException:
-            print("no element exception")
-        return self.driver.current_window_handle  # return current window (tab)
+        self.driver.set_window_size(900, 600)        
 
     @staticmethod
     def create_image_folder(folder_name: str='images'):
@@ -336,63 +319,24 @@ class InstagramCrawlerEngine(Thread):
             log_queue (queue.Queue): thread-safe queue for collecting download status.
         """
         self.launch_driver()
-        self.main_window = self.init_crawl()
 
         count = 0  # keep track of crawl count
         start_time = time.time()
         url_list = []
-        url_list.append(self.driver.current_url)
         while not self.thread_stopper.is_set():
-            
-            #try:
-            self.go_next_post()
-            if len(url_list) > 0 and url_list[-1] != self.driver.current_url:
-                count += 1
-                print(self.driver.current_url)
-                url_list.append(self.driver.current_url)
-                current_time = time.time() - start_time
-                log_entry = {
-                    'time': "count: {}, {}m, {}s".format(count, current_time // 60, current_time % 60),
-                    # 'name': filename,
-                    # 'filepath': os.path.join(self.save_folder_name, filename),
-                    # 'success': success,
-                }
-                print(log_entry)
-            # self.go_next_post()
-            # success = self.find_next_text()
-           
-            # # success, filename = self.download(
-            # #         img_src=image_src, folder=self.save_folder_name)
-            # attempts = 0
-            # while attempts < 5:
-            #     try:
-            #         main_text, comment_text = self.find_text()
-            #         print("success")
-            #         break
-            #     except:
-            #         print("fail attempt")
-            #         attempts += 1
-            # print(main_text[0])
+            posts_div = self.driver.find_elements_by_xpath("//article/div")[1]
+            posts_div_rows = posts_div.find_elements_by_xpath('./div/div')
+            #div_row = posts_div_rows.find_elements_by_xpath('/div')[0]
+            for div_row in posts_div_rows:
+                div_elems = div_row.find_elements_by_xpath('./div')
+                for div_elem in div_elems:
+                    print(div_elem.find_element_by_css_selector('a').get_attribute('href'))
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2)
+            # for div_row in div_rows:
+            #     print(div_row.find_element_by_css_selector('a').get_attribute('href'))
+            # print(div_rows[0].find_element_by_css_selector('a').get_attribute('href'))
 
-            # log the download event
-                
-
-            '''
-            except (self.ImageNotFoundException,
-                selenium.common.exceptions.StaleElementReferenceException):
-                print("exception")
-                # if (True):
-                #     main_text, comment_text = self.find_text()
-                # print(main_text[0])
-
-                # image not found for this step
-                # (it might be video or the link might have been broken)
-                # StaelElementReferenceException occurs when DOM element is modified
-                # just before retrieving image source.
-                continue
-            except (ConnectionRefusedError, http.client.RemoteDisconnected):
-                print('Driver closed by SIGINT or connection refused from target host.')
-                break'''
         print('RETURNING from start_crawl() and closing thread id : {}.'.format(threading.get_ident()))
 
     class ImageNotFoundException(Exception):
